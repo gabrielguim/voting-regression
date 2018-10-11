@@ -2,18 +2,20 @@
 title: "(tentar) Explicar a votação de Deputados usando Regressão Linear"
 output:
     html_document:
+        toc: true
+        toc_float: true
         code_folding: hide
         theme: flatly
+        
 ---
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 
+library(gridExtra)
 library(tidyverse)
-library(here)
+library(lattice)
 library(GGally)
-library(ggfortify)
-library(broom)
-require(ISLR)
-library(modelr) # devtools::install_github("hadley/modelr")
+library(here)
+library(grid)
 
 theme_set(theme_bw())
 
@@ -22,51 +24,7 @@ theme_set(theme_bw())
 # Os Dados
 
 ```{r}
-eleicoes_2006 <- readr::read_csv(
-  here::here('data/eleicoes_2006.csv'), 
-  local=readr::locale("br"),
-  col_types = cols(
-    ano = col_integer(),
-    sequencial_candidato = col_character(),
-    quantidade_doacoes = col_integer(),
-    quantidade_doadores = col_integer(),
-    total_receita = col_double(),
-    media_receita = col_double(),
-    recursos_de_outros_candidatos.comites = col_double(),
-    recursos_de_pessoas_fisicas = col_double(),
-    recursos_de_pessoas_juridicas = col_double(),
-    recursos_proprios = col_double(),
-    `recursos_de_partido_politico` = col_double(),
-    quantidade_despesas = col_integer(),
-    quantidade_fornecedores = col_integer(),
-    total_despesa = col_double(),
-    media_despesa = col_double(),
-    votos = col_integer(),
-    .default = col_character()))
-
-eleicoes_2010 <- readr::read_csv(
-  here::here('data/eleicoes_2010.csv'), 
-  local=readr::locale("br"),
-  col_types = cols(
-    ano = col_integer(),
-    sequencial_candidato = col_character(),
-    quantidade_doacoes = col_integer(),
-    quantidade_doadores = col_integer(),
-    total_receita = col_double(),
-    media_receita = col_double(),
-    recursos_de_outros_candidatos.comites = col_double(),
-    recursos_de_pessoas_fisicas = col_double(),
-    recursos_de_pessoas_juridicas = col_double(),
-    recursos_proprios = col_double(),
-    `recursos_de_partido_politico` = col_double(),
-    quantidade_despesas = col_integer(),
-    quantidade_fornecedores = col_integer(),
-    total_despesa = col_double(),
-    media_despesa = col_double(),
-    votos = col_integer(),
-    .default = col_character()))
-
-eleicoes_2006_2010 <- readr::read_csv(
+eleicoes_data <- readr::read_csv(
   here::here('data/eleicoes_2006_e_2010.csv'), 
   local=readr::locale("br"),
   col_types = cols(
@@ -87,21 +45,531 @@ eleicoes_2006_2010 <- readr::read_csv(
     media_despesa = col_double(),
     votos = col_integer(),
     .default = col_character()))
+```
+
+```{r}
+eleicoes_data %>% 
+  mutate(nome = toupper(nome),
+         sexo = toupper(sexo),
+         grau = toupper(grau),
+         nome = toupper(nome),
+         cargo = toupper(cargo),
+         ocupacao = toupper(ocupacao),
+         partido = toupper(partido),
+         estado_civil = toupper(estado_civil)) %>%
+  mutate(uf = as.factor(uf),
+         nome = as.factor(nome),
+         sexo = as.factor(sexo),
+         grau = as.factor(grau),
+         nome = as.factor(nome),
+         cargo = as.factor(cargo),
+         partido = as.factor(partido),
+         ocupacao = as.factor(ocupacao),
+         estado_civil = as.factor(estado_civil),
+         sequencial_candidato = as.numeric(sequencial_candidato)) %>% 
+  mutate(total_recursos = recursos_de_pessoas_fisicas +
+                            recursos_de_outros_candidatos.comites +
+                            recursos_de_pessoas_juridicas +
+                            recursos_proprios) -> eleicoes_data
+
+eleicoes_2006 <- eleicoes_data %>% filter(ano == 2006)
+eleicoes_2010 <- eleicoes_data %>% filter(ano == 2010)
+
+eleicoes_data %>% 
+  glimpse()
 
 ```
 
 # Perguntas
 
-## 1 - Um modelo de regressão múltipla com todas as variáveis é plausível para explicar a variação em y (número de votos) em 2006? Mesma pergunta para 2010. 
+## 1 - Um modelo de regressão múltipla com todas as variáveis é plausível para explicar a variação em y (número de votos) em 2006? Mesma pergunta para 2010.
 
-## 2 - Compare as regressões construídas para 2006 e 2010. Quais as diferenças/semelhanças percebidas? Algumas sugestões:
-Analise os plots de resíduos e verifique se há tendências nos erros para cada ano.
-Quais variáveis conseguem explicar melhor o número de votos? Compare essas variáveis entre os modelos. Mesma coisa para as variáveis menos explicativas.
-Compare os valores de R2 e RSE considerando as regressões para cada ano.
-Inclua outros pontos de comparação que você ache interessante.
-## 3 - Todas as variáveis são úteis para os modelos de regressão? Há variáveis redudantes? Faça análises para 2006 e 2010 separadamente. 
+### 2006
+
+```{r}
+require(GGally)
+
+eleicoes_2006 %>%
+  select(-partido,
+         -uf,-nome,
+         -estado_civil,
+         -ocupacao,-ano,
+         -total_recursos,
+         -cargo,-grau,-sexo) %>%
+  na.omit() %>%
+  ggcorr(palette = "PiYG",
+         color = "black",
+         label = TRUE, hjust = 1,
+         label_size = 3, size = 4,
+         nbreaks = 5, layout.exp = 7) +
+  ggtitle("Gráfico de Correlação para Eleições de 2006")
+```
+
+Acredito não ser plausível, visto que, por exemplo, __sequencial_candidato__ possui valores muito baixos indicando uma correlação bem baixa com principalmente com a nossa variável resposta (votos). E de fato, o número sequencial do candidato não agrega em nada.
+
+### 2010
+
+```{r}
+require(GGally)
+
+eleicoes_2010 %>%
+  select(-partido,
+         -uf,-nome,
+         -estado_civil,
+         -total_recursos,
+         -ocupacao,-ano,
+         -cargo,-grau,-sexo) %>%
+  na.omit() %>%
+  ggcorr(palette = "PiYG",
+         color = "black",
+         label = TRUE, hjust = 1,
+         label_size = 3, size = 4,
+         nbreaks = 5, layout.exp = 7) +
+  ggtitle("Gráfico de Correlação para Eleições de 2010")
+```
+
+De forma análoga, __sequencial_candidato__ não seria uma boa escolha e talvez para as eleições de 2010 os __recursos_proprios__ não se apresentam com muito "peso" na nossa variável resposta.
+
+
+```{r}
+eleicoes_data %>% distinct(cargo)
+```
+
+Em ambos os anos (2006 e 2010), a variável __cargo__ não possui relevância pois todos são Deputados como podemos ver na tabela acima.
+
+## 2 - Compare as regressões construídas para 2006 e 2010. Quais as diferenças/semelhanças percebidas?
+
+### Preparando os dados...
+
+Nessa etapa, iremos colocar as variáveis numéricas na mesma escala e adicionar mais um campo, o qual nos traz a informação dos recursos totais utilizados...
+
+```{r}
+eleicoes_data %>%
+   mutate_at(.vars = vars(quantidade_doacoes,
+                          quantidade_doadores,
+                          total_recursos,
+                          total_receita,
+                          media_receita,
+                          sequencial_candidato,
+                          recursos_de_outros_candidatos.comites,
+                          recursos_de_pessoas_fisicas,
+                          recursos_de_pessoas_juridicas,
+                          recursos_proprios,
+                          recursos_de_partido_politico,
+                          quantidade_despesas,
+                          quantidade_fornecedores,
+                          total_despesa,
+                          media_despesa),
+             .funs = funs(as.numeric(scale(.)))) -> eleicoes_gerais_escala
+
+eleicoes_gerais_escala %>%
+  sample_n(5)
+```
+
+
+```{r}
+eleicoes_2006 %>%
+   mutate_at(.vars = vars(quantidade_doacoes,
+                          quantidade_doadores,
+                          total_recursos,
+                          total_receita,
+                          media_receita,
+                          sequencial_candidato,
+                          recursos_de_outros_candidatos.comites,
+                          recursos_de_pessoas_fisicas,
+                          recursos_de_pessoas_juridicas,
+                          recursos_proprios,
+                          recursos_de_partido_politico,
+                          quantidade_despesas,
+                          quantidade_fornecedores,
+                          total_despesa,
+                          media_despesa),
+             .funs = funs(as.numeric(scale(.)))) -> eleicoes_2006_escala
+
+eleicoes_2006_escala %>%
+  sample_n(5)
+```
+
+```{r}
+eleicoes_2010 %>%
+   mutate_at(.vars = vars(quantidade_doacoes,
+                          quantidade_doadores,
+                          total_recursos,
+                          total_receita,
+                          media_receita,
+                          sequencial_candidato,
+                          recursos_de_outros_candidatos.comites,
+                          recursos_de_pessoas_fisicas,
+                          recursos_de_pessoas_juridicas,
+                          recursos_proprios,
+                          recursos_de_partido_politico,
+                          quantidade_despesas,
+                          quantidade_fornecedores,
+                          total_despesa,
+                          media_despesa),
+             .funs = funs(as.numeric(scale(.)))) -> eleicoes_2010_escala
+
+eleicoes_2010_escala %>%
+  sample_n(5)
+```
+
+### 2006
+
+```{r}
+eleicoes_2006.lm <- lm(votos ~  partido * (total_receita + total_despesa + total_recursos) +
+                                uf * (total_receita + total_despesa + total_recursos) +
+                                (quantidade_doadores + quantidade_doacoes) +
+                                (quantidade_despesas + quantidade_fornecedores), 
+          data = eleicoes_2006_escala)
+
+broom::glance(eleicoes_2006.lm)
+```
+
+Com o modelo utilizado nós conseguimos um R² de aproximadamente __64%__ e um R² ajustado de aproximadamente __62%__. Ou seja, o nosso modelo consegue explicar bem o nosso conjunto de dados.
+
+```{r}
+eleicoes_2006.lm.res <- resid(eleicoes_2006.lm)
+std.resid <- rstandard(eleicoes_2006.lm)
+votos <- eleicoes_2006_escala$votos
+
+resid_data_2006 <- data.frame(eleicoes_2006.lm.res, std.resid, votos,
+                       stringsAsFactors = FALSE)
+```
+
+```{r}
+resid_data_2006 %>%
+  ggplot(aes(votos, eleicoes_2006.lm.res)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = 0,
+             color = "darkorange") +
+  labs(x = "Variável Resposta (Votos)", y = "Resíduos") +
+  ggtitle("Análise de Resíduos (2006)") +
+  scale_x_log10()
+```
+
+Com essa visualização para a análise de resíduos conseguimos perceber que o nosso modelo consegue se adequar/ajustar aos dados de uma forma convincente. Quando a quantidade de votos cresce muito para alguns deputados, o nosso modelo não consegue explicar o motivo do crescimento.
+
+```{r}
+eleicoes_2006.lm %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2006)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+O Q-Q Plot mostrado acima nos dá mais um indicativo de que o nosso modelo consegue um bom ajuste em relação ao nosso conjunto de dados.
+
+### 2010
+
+Repetindo o mesmo modelo para o ano de 2010...
+
+```{r}
+eleicoes_2010.lm <- lm(votos ~  partido * (total_receita + total_despesa + total_recursos) +
+                                uf * (total_receita + total_despesa + total_recursos) +
+                                (quantidade_doadores + quantidade_doacoes) +
+                                (quantidade_despesas + quantidade_fornecedores), 
+          data = eleicoes_2010_escala)
+
+broom::glance(eleicoes_2010.lm)
+```
+
+Aplicando o mesmo modelo para as eleições de 2010 conseguimos perceber a primeira diferença no R², pois enquanto na de 2006 tínhamos um R² de aproximadamente __64%__ aqui conseguimos aproximadamente __58%__. Uma diferença bastante considerável.
+
+```{r}
+eleicoes_2010.lm.res <- resid(eleicoes_2010.lm)
+std.resid <- rstandard(eleicoes_2010.lm)
+votos <- eleicoes_2010_escala$votos
+
+resid_data_2010 <- data.frame(eleicoes_2010.lm.res, std.resid, votos,
+                       stringsAsFactors = FALSE)
+```
+
+```{r}
+resid_data_2010 %>%
+  ggplot(aes(votos, eleicoes_2010.lm.res)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = 0,
+             color = "darkorange") +
+  labs(x = "Variável Resposta (Votos)", y = "Resíduos") +
+  ggtitle("Análise de Resíduos (2010)") +
+  scale_x_log10()
+```
+
+O mesmo modelo aplicado às eleições de 2010 parece se ajustar/adequar mais aos dados... Em uma dada quantidade de votos, na __Análise de Resíduos (2006)__ os pontos parecem mais separados enquanto aqui eles ficam bem mais próximos à reta... O nosso conjunto de dados para o ano de 2010 possui mais observações, o que pode ter sido um fator que modificou a "eficiência" do modelo utilizado.
+
+```{r}
+eleicoes_2010.lm %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2010)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+Como esperado, o Q-Q Plot acima nos dá mais um indicativo da qualidade do nosso modelo. Aparentemente a reta vermelha pontilhada nessa visualização aparenta estar acompanhando a curva de forma mais "fiel" em relação à visualização do Q-Q Plot para 2006. 
+
+### Conclusão
+
+Apesar de termos uma diferença grande no valor de R² para os dois conjuntos de dados, os plots para os resíduos de cada modelo parecem ter melhor "desempenho" para as eleições de 2010, pois aparentemente a reta está "seguindo" mais pontos, o que indica que temos um melhor ajuste em relação aos resíduos.
+
+## 3 - Todas as variáveis são úteis para os modelos de regressão? Há variáveis redudantes? Faça análises para 2006 e 2010 separadamente.
+
+Como já vimos na resposta para a questão 1, nem todas as variáveis são úteis...
+
+### Redundância
+
+Como já temos informações sobre despesas e receitas, talvez a informação da quantidade de fornecedores ou de despesas seja redundante para o nosso modelo...
+
+### 2006
+
+```{r}
+input <- eleicoes_2006
+input$sequencial_candidato <- as.numeric(as.factor(input$sequencial_candidato))
+input$nome <- as.numeric(as.factor(input$nome))
+input$uf <- as.numeric(as.factor(input$uf))
+input$partido <- as.numeric(as.factor(input$partido))
+input$cargo <- as.numeric(as.factor(input$cargo))
+input$sexo <- as.numeric(as.factor(input$sexo))
+input$grau <- as.numeric(as.factor(input$grau))
+input$estado_civil <- as.numeric(as.factor(input$estado_civil))
+input$ocupacao <- as.numeric(as.factor(input$ocupacao))
+```
+
+```{r}
+model_2006_original <- lm(formula = votos ~ ., input, na.action = na.omit)
+
+broom::glance(model_2006_original)
+```
+
+```{r}
+model_2006_selected <- lm(formula = votos ~ ., input %>% select(-quantidade_despesas, -quantidade_fornecedores), na.action = na.omit)
+
+broom::glance(model_2006_selected)
+```
+
+É possível perceber que o R² dos dois modelos ficou bem parecido... O que pode nos indicar de certa forma uma redundância.
+
+```{r}
+model_2006_original %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2006 com o modelo original)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+```{r}
+model_2006_selected %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2006 com o modelo modificado)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+Ambos os Q-Q Plots nos possibilitam ver a adequação do modelo em relação aos dados e são bem parecidos. Ou seja, possívelmente essas duas variáveis de fato estejam resumidas nas outras variáveis que temos, possibilitando assim essa semelhança entre os modelos.
+
+### 2010
+
+```{r}
+input <- eleicoes_2010
+input$sequencial_candidato <- as.numeric(as.factor(input$sequencial_candidato))
+input$nome <- as.numeric(as.factor(input$nome))
+input$uf <- as.numeric(as.factor(input$uf))
+input$partido <- as.numeric(as.factor(input$partido))
+input$cargo <- as.numeric(as.factor(input$cargo))
+input$sexo <- as.numeric(as.factor(input$sexo))
+input$grau <- as.numeric(as.factor(input$grau))
+input$estado_civil <- as.numeric(as.factor(input$estado_civil))
+input$ocupacao <- as.numeric(as.factor(input$ocupacao))
+```
+
+```{r}
+model_2010_original <- lm(formula = votos ~ ., input, na.action = na.omit)
+
+broom::glance(model_2010_original)
+```
+
+```{r}
+model_2010_selected <- lm(formula = votos ~ ., input %>% select(-quantidade_despesas, -quantidade_fornecedores), na.action = na.omit)
+
+broom::glance(model_2010_selected)
+```
+
+Como esperado, assim como em 2006, os modelos para as eleições obtiveram resultados semelhantes para o R², inclusive é um valor bem baixo, visto que não "explica" nem 50% dos dados.
+
+```{r}
+model_2010_original %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2010 com o modelo original)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+```{r}
+model_2010_selected %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2010 com o modelo modificado)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+De forma análoga aos resultados obtidos nas visualizações para as eleições de 2006, as visualizações são bastante semelhantes... Nos possibilitando a hipótese de que as variáveis são, de certo modo, redundantes.
 
 ## 4 - No caso de haver variáveis pouco explicativas e/ou redudantes, construa um novo modelo sem essas variáveis e o compare ao modelo com todas as variáveis (e.g. em termos de R2 e RSE). Faça isso para 2006 e 2010 separadamente. 
 
+### quantidade_despesas / quantidade_fornecedores (2006)
+
+Modificando o nosso modelo para retirar essas duas variáveis, obtemos o seguinte resultado:
+
+```{r}
+eleicoes_2006.lm.v2 <- lm(votos ~  partido * (total_receita + total_despesa + total_recursos) +
+                                    uf * (total_receita + total_despesa + total_recursos) +
+                                    (quantidade_doadores + quantidade_doacoes), 
+          data = eleicoes_2006_escala)
+
+broom::glance(eleicoes_2006.lm.v2)
+```
+
+De forma semelhante ao resultado do modelo da questão 2, o nosso R² obteve um valor de aproximadamente __64%__. Ou seja, para o nosso modelo e nosso conjunto de dados as variáveis sobre as quantidades de despesas e fornecedores são redundantes, pois provavelmente já são "explicadas" indiretamente no total de receitas, despesas e recursos.
+
+```{r}
+eleicoes_2006.lm.v2 %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2006 com o modelo modificado)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+O Q-Q Plot parece bem semelhante ao que vimos na questão 2.
+
+### Conclusão
+
+Tanto os valores do R² como os plots para os resíduos apresentam valores e visualizações semelhantes ao que vimos no modelo original descrito na questão 2. Portanto, a partir dessas informações, podemos dizer que para o conjunto de dados das eleições de 2006, as duas variáveis são redundantes.
+
+### quantidade_despesas / quantidade_fornecedores (2010)
+
+De forma análoga...
+
+```{r}
+eleicoes_2010.lm.v2 <- lm(votos ~  partido * (total_receita + total_despesa + total_recursos) +
+                                    uf * (total_receita + total_despesa + total_recursos) +
+                                    (quantidade_doadores + quantidade_doacoes),
+                          data = eleicoes_2010_escala)
+
+broom::glance(eleicoes_2010.lm.v2)
+```
+
+Como esperado, os valores são bastante semelhantes ao do modelo original utilizado na questão 2.
+
+```{r}
+eleicoes_2010.lm.v2 %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2010 com o modelo modificado)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+O Q-Q Plot para o novo modelo parece muito com o que vimos mais acima na questão anterior.
+
+### Conclusão
+
+De forma análoga à conclusão do modelo com dados de 2006, aqui também temos o mesmo resultado obtido... Tanto para o R² como para o Q-Q plot.
+
 ## 5 - Construa agora uma regressão considerando os anos 2006 e 2010 em conjunto. Que diferenças/semelhanças você percebe em relação aos modelos individuais por ano? Veja a questão 2 para sugestões que você usar para comparação.
 
+```{r}
+eleicoes_gerais.lm <- lm(votos ~  partido * (total_receita + total_despesa + total_recursos) +
+                                    uf * (total_receita + total_despesa + total_recursos) +
+                                    (quantidade_doadores + quantidade_doacoes), 
+          data = eleicoes_gerais_escala)
+
+broom::glance(eleicoes_gerais.lm)
+```
+
+Utilizando-se do mesmo modelo da pergunta 2, obtivemos um R² de aproximadamente __54%__, o que é uma marca relativamente boa considerando que agora temos muito mais observações em nosso conjunto.
+
+```{r}
+eleicoes_gerais.lm.res <- resid(eleicoes_gerais.lm)
+std.resid <- rstandard(eleicoes_gerais.lm)
+votos <- eleicoes_gerais_escala$votos
+
+resid_data_geral <- data.frame(eleicoes_gerais.lm.res, std.resid, votos,
+                       stringsAsFactors = FALSE)
+```
+
+```{r}
+resid_data_geral %>%
+  ggplot(aes(votos, eleicoes_gerais.lm.res)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = 0,
+             color = "darkorange") +
+  labs(x = "Variável Resposta (Votos)", y = "Resíduos") +
+  ggtitle("Análise de Resíduos (2006 e 2010)") +
+  scale_x_log10()
+```
+
+Com essa análise dos anos de 2006 e 2010 conseguimos perceber também que o nosso modelo consegue se ajustar/adequar a boa parte dos dados, como vimos pelo valor do R², embora haja uma perda quando a quantidade de votos começa a aumentar. 
+
+Podemos entender assim que quando os dados são mesclados, o nosso modelo consegue generalizar bem, pois mesmo com uma quantidade maior de observações, o nosso modelo obteve um resultado semelhante aos que fizemos para cada ano separadamente, conseguindo explicar mais de 50% dos dados e tendo uma adequação até uma certa quantidade de votos.
+
+```{r}
+eleicoes_gerais.lm %>%
+  ggplot(aes(sample = rstandard(.))) +
+  stat_qq(na.rm = TRUE,
+          shape = 1,
+          size = 3) +
+  labs(title="Q-Q Plot (Eleições de 2006 e 2010)",
+        x="Theoretical Quantiles",
+        y="Sample Quantiles") +
+  geom_abline(color = "red",
+              size = 0.8,
+              linetype="dashed")
+```
+
+Como podemos verificar, o nosso Q-Q Plot está bem ajustado. Portanto, podemos reforçar a nossa ideia de que o nosso modelo é válido.
